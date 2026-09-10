@@ -1,0 +1,334 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: #050a12;
+  --color-surface: #0a1628;
+  --color-surface2: #0f1e36;
+  --color-border: #1a2d4a;
+  --color-cyan: #00d4ff;
+  --color-cyan-dim: #0099bb;
+  --color-amber: #f59e0b;
+  --color-red: #ef4444;
+  --color-green: #22c55e;
+  --color-purple: #a855f7;
+  --color-text: #e2e8f0;
+  --color-muted: #64748b;
+  --color-muted2: #94a3b8;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1a2d4a transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #1a2d4a;
+  border-radius: 2px;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: #050a12;
+  color: #e2e8f0;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6, .font-display {
+  font-family: 'Rajdhani', sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.font-mono-data {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+@keyframes pulse-cyan {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 212, 255, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(0, 212, 255, 0.7); }
+}
+
+.animate-pulse-cyan { animation: pulse-cyan 2s ease-in-out infinite; }
+.animate-fade-in-up { animation: fadeInUp 0.4s ease-out forwards; }
+.animate-glow { animation: glow 2s ease-in-out infinite; }
+
+/* Loading placeholders: a sweep of light across a dim block, so a pending
+   value reads as "still arriving" instead of as a real figure. */
+@keyframes skeleton-sweep {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton {
+  border-radius: 4px;
+  background-color: #0f1e36;
+  background-image: linear-gradient(
+    90deg,
+    rgba(0, 212, 255, 0) 0%,
+    rgba(0, 212, 255, 0.13) 45%,
+    rgba(168, 85, 247, 0.13) 55%,
+    rgba(0, 212, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.4s linear infinite;
+}
+
+/* Respect users who have asked for less motion - keep the dim block, drop the sweep. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: pulse-cyan 2s ease-in-out infinite; background-image: none; }
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.hex-pattern {
+  background-image: radial-gradient(circle at 1px 1px, rgba(0, 212, 255, 0.08) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+.card {
+  background: #0a1628;
+  border: 1px solid #1a2d4a;
+  border-radius: 8px;
+}
+
+.card-glow {
+  background: #0a1628;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.05), inset 0 1px 0 rgba(0, 212, 255, 0.1);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #00d4ff, #0099bb);
+  color: #050a12;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 10px 24px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: #00d4ff;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 9px 20px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: rgba(0, 212, 255, 0.08);
+  border-color: #00d4ff;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.nav-item:hover {
+  color: #e2e8f0;
+  background: rgba(255,255,255,0.04);
+}
+
+.nav-item.active {
+  color: #00d4ff;
+  background: rgba(0, 212, 255, 0.08);
+  border-color: rgba(0, 212, 255, 0.2);
+}
+
+.stat-card {
+  background: #0a1628;
+  border: 1px solid #1a2d4a;
+  border-radius: 10px;
+  padding: 20px 24px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.stat-card:hover { border-color: rgba(0, 212, 255, 0.3); }
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-color, #00d4ff), transparent);
+}
+
+.badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.badge-active { background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); }
+.badge-closed { background: rgba(100, 116, 139, 0.15); color: #64748b; border: 1px solid rgba(100, 116, 139, 0.3); }
+.badge-critical { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+.badge-warning { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); }
+.badge-info { background: rgba(0, 212, 255, 0.12); color: #00d4ff; border: 1px solid rgba(0, 212, 255, 0.3); }
+
+.input-field {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid #1a2d4a;
+  border-radius: 6px;
+  padding: 11px 14px;
+  color: #e2e8f0;
+  font-size: 14px;
+  font-family: 'Inter', sans-serif;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.input-field:focus {
+  border-color: rgba(0, 212, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.08);
+}
+
+.input-field::placeholder { color: #475569; }
+
+.table-row {
+  border-bottom: 1px solid #0f1e36;
+  transition: background 0.15s;
+}
+
+.table-row:hover { background: rgba(0, 212, 255, 0.03); }
+
+.node-circle {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.node-circle:hover { filter: brightness(1.3); }
+
+/* ─── Dashboard stat tile ───────────────────────────────────────────────── */
+.stat-tile {
+  background: #0a1628;
+  border: 1px solid #1a2d4a;
+  border-radius: 12px;
+  padding: 22px 24px 20px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.stat-tile:hover { border-color: rgba(0, 212, 255, 0.28); }
+
+.stat-tile::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 76px;
+  height: 3px;
+  background: var(--accent-color, #00d4ff);
+}
+
+/* ─── Dashboard alert rows ──────────────────────────────────────────────── */
+.alert-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 0;
+  border-bottom: 1px solid #101d33;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.alert-row:last-child { border-bottom: none; }
+.alert-row:hover { background: rgba(0, 212, 255, 0.03); }
+
+/* ─── Quick action buttons ──────────────────────────────────────────────── */
+.qa-btn {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+  font-size: 14.5px;
+  letter-spacing: 0.03em;
+  transition: all 0.18s ease;
+}
+
+.qa-btn:hover { filter: brightness(1.35); }
+
+/* ─── Keyboard hint ─────────────────────────────────────────────────────── */
+.kbd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #475569;
+  border: 1px solid #1a2d4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.03);
+  flex-shrink: 0;
+}

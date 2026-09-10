@@ -1,0 +1,6 @@
+sender,receiver,amount,transaction_time,transaction_type
+Aegis Corp,Aegis Employee Payroll Pool,245200,2026-08-10T00:42:00,NEFT
+Aegis Corp,Verma Consulting,50000000,2026-08-10T01:25:00,IMPS
+Aegis Corp,Netflix Entertainment Services India,499,2026-08-10T04:12:00,UPI
+Aegis Corp,Q-Tech Systems Inc.,124600,2026-08-10T05:15:00,NEFT
+Aegis Corp,Self - Cash Withdrawal,120000,2026-08-10T05:50:00,ATM

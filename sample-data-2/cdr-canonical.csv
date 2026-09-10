@@ -1,0 +1,9 @@
+caller,receiver,call_time,duration_seconds,tower_id
+Rohan Joshi,Ananya Verma,2026-08-10T01:15:00,45,"Sector-5, Tower A"
+Ananya Verma,Kunal Saxena,2026-08-10T01:18:00,120,"Sector-5, Tower B"
+Nitin Desai,Rohan Joshi,2026-08-10T01:25:00,30,"New Town, Tower A"
+Kunal Saxena,Kabir Thapar,2026-08-10T02:10:00,15,"Sector-5, Tower C"
+Ananya Verma,Tushar Kapoor,2026-08-10T03:05:00,180,"Salt Lake, Tower A"
+Kunal Saxena,Sameer Khan,2026-08-10T04:15:00,90,"New Town, Tower B"
+Sameer Khan,Dr. Angela Zhou,2026-08-10T04:45:00,210,International Roaming
+Kunal Saxena,Rohan Joshi,2026-08-10T05:30:00,15,"Sector-5, Tower C"

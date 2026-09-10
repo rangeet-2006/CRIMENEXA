@@ -1,0 +1,10 @@
+{
+  "description": "This web application streamlines case management for investigators, offering real-time data visualization, alerts, and secure collaboration for efficient decision-making.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

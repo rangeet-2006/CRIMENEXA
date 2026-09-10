@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Model weights and other large artifacts pulled at runtime. The repo's root
+# .gitattributes routes these through Git LFS, so committing one silently
+# consumes LFS quota - keep them out unless that is intended.
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors

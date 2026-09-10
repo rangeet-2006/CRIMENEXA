@@ -1,0 +1,72 @@
+services:
+  - type: web
+    name: crimenexa-backend
+    runtime: docker
+    rootDir: crimenexa-backend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: DB_URL
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      # Base URL of the AI service, INCLUDING the /api suffix. Callers append
+      # the route only (see AiIntegrationService.resolveEndpoint).
+      #
+      # Deliberately not hardcoded: a hostname baked in here points a fresh
+      # deployment at whichever account already owns that name, silently
+      # cross-wiring two environments. Set it to your own AI service URL after
+      # the blueprint creates it - Render assigns the hostname, and it will be
+      # suffixed if the plain name is taken.
+      - key: AI_SERVICE_BASE_URL
+        sync: false
+      # Supabase object storage for evidence files. Required - the backend will
+      # not start without these, as the properties have no defaults.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: evidence-files
+      # Shared secret for /api/internal/**, which the AI service uses to push
+      # alerts. That path is exempt from session auth, so this is the only thing
+      # guarding it. Required, and must match INTERNAL_API_KEY on the AI service.
+      - key: INTERNAL_API_KEY
+        sync: false
+
+  - type: web
+    name: crimenexa-ai-service
+    runtime: docker
+    rootDir: crimenexa-ai-service
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      # Browser origins allowed to call this service, comma-separated. Falls
+      # back to localhost defaults in main.py, so only needed once a deployed
+      # frontend calls this service directly.
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      # Where to push detected alerts, and the shared secret for doing so.
+      # Must match INTERNAL_API_KEY on the backend. Without the key,
+      # notify_alert returns {"status": "skipped"} and no alert is ever raised -
+      # it fails quietly, so an unset value looks like "no anomalies found".
+      - key: BACKEND_BASE_URL
+        sync: false
+      - key: INTERNAL_API_KEY
+        sync: false

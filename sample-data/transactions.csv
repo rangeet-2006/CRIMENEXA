@@ -1,0 +1,9 @@
+sender,receiver,amount,transaction_time,transaction_type
+Raza Hussain,Ahmed Khan,4800000,2026-04-12T20:52:00,TRANSFER
+Ahmed Khan,Tariq Mehmood,350000,2026-04-12T21:24:00,TRANSFER
+Ahmed Khan,Sara Malik,275000,2026-04-12T21:33:00,TRANSFER
+Sara Malik,Maria Santos,90000,2026-04-13T07:41:00,TRANSFER
+Ahmed Khan,CryptoFront LLC,2200000,2026-04-13T10:18:00,TRANSFER
+CryptoFront LLC,Chen Wei,1850000,2026-04-13T12:02:00,TRANSFER
+Raza Hussain,Shell Corp XYZ,1500000,2026-04-13T14:26:00,TRANSFER
+Maria Santos,Sara Malik,12000,2026-04-14T08:15:00,CASH_DEPOSIT
