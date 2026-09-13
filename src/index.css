@@ -332,3 +332,60 @@ h1, h2, h3, h4, h5, h6, .font-display {
   background: rgba(255, 255, 255, 0.03);
   flex-shrink: 0;
 }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+}
+
+/* ─── Landing page ──────────────────────────────────────────────────────────
+   Everything here is prefixed lp- and used only by src/landing. */
+
+@keyframes lp-draw { to { stroke-dashoffset: 0; } }
+@keyframes lp-fade { to { opacity: 1; } }
+@keyframes lp-pulse {
+  0% { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+@keyframes lp-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@keyframes lp-float {
+  0%, 100% { transform: translateY(0) rotate(var(--lp-tilt, 0deg)); }
+  50% { transform: translateY(-14px) rotate(var(--lp-tilt, 0deg)); }
+}
+
+/* Graph entrance: edges draw in, nodes fade up - only once scrolled into view. */
+.lp-graph .lp-edge { stroke-dasharray: 1; stroke-dashoffset: 1; }
+.lp-graph .lp-node { opacity: 0; }
+.lp-graph.is-visible .lp-edge { animation: lp-draw 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.lp-graph.is-visible .lp-node { animation: lp-fade 0.5s ease-out forwards; }
+.lp-pulse { transform-box: fill-box; transform-origin: center; animation: lp-pulse 2.4s ease-out infinite; }
+/* Focus on a node shows its halo and tooltip, which is the focus indicator. */
+.lp-node-hit:focus { outline: none; }
+
+.lp-marquee { animation: lp-marquee 36s linear infinite; }
+.lp-marquee-wrap:hover .lp-marquee { animation-play-state: paused; }
+.lp-float { animation: lp-float 6s ease-in-out infinite; }
+
+.lp-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lp-reveal.is-visible { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-graph .lp-edge { stroke-dashoffset: 0; animation: none !important; }
+  .lp-graph .lp-node { opacity: 1; animation: none !important; }
+  .lp-pulse, .lp-marquee, .lp-float { animation: none !important; }
+  .lp-pulse { opacity: 0; }
+  .lp-reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* Print has no scrolling, so nothing would ever reveal - show everything. */
+@media print {
+  .lp-reveal, .lp-graph .lp-node { opacity: 1 !important; transform: none !important; animation: none !important; }
+  .lp-graph .lp-edge { stroke-dashoffset: 0 !important; animation: none !important; }
+}

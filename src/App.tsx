@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import * as api from "./lib/api";
 import * as AIApi from "./lib/AIApi";
 import type { ApiCase, ApiUser } from "./lib/api";
+import LandingPage from "./landing/LandingPage";
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
 // Served from /public. BASE_URL keeps this correct when Vite builds under a
@@ -9,7 +10,7 @@ import type { ApiCase, ApiUser } from "./lib/api";
 const LOGO_SRC = `${import.meta.env.BASE_URL}logo-wordmark.png`;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Page = "login" | "signup" | "dashboard" | "cases" | "upload" | "network" | "alerts" | "reports";
+type Page = "landing" | "login" | "signup" | "dashboard" | "cases" | "upload" | "network" | "alerts" | "reports";
 type Role = "Admin" | "Senior Investigator" | "Field Officer";
 
 // ─── Role <-> backend mapping ──────────────────────────────────────────────
@@ -96,23 +97,117 @@ type UiAlert = ReturnType<typeof apiAlertToUiAlert>;
 // connections } as-is. Nodes without x/y (most likely, since the AI service
 // deals in graph structure, not pixel layout) are placed on a simple circle;
 // swap in a real force-directed layout (e.g. d3-force) later if needed.
-function layoutGraphNodes(nodes: api.ApiGraphNode[]) {
-  const cx = 400, cy = 260;
-  const r = Math.min(260, 90 + nodes.length * 14);
-  return nodes.map((n, i) => {
-    const angle = (2 * Math.PI * i) / Math.max(nodes.length, 1);
-    return {
-      id: n.id,
-      label: n.label,
-      type: n.type,
-      risk: n.risk ?? 50,
-      role: n.role ?? "Unknown",
-      x: n.x ?? cx + r * Math.cos(angle),
-      y: n.y ?? cy + r * Math.sin(angle),
-    };
+function seededRandom(seed: string) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) {
+    h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
+  }
+  return () => {
+    h = Math.imul(h ^ (h >>> 15), h | 1);
+    h ^= h + Math.imul(h ^ (h >>> 7), h | 61);
+    return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function forceLayoutNodes(
+  nodes: (api.ApiGraphNode & { caseRef?: string })[],
+  edges: { from: string; to: string }[]
+) {
+  const count = Math.max(nodes.length, 1);
+
+  const caseRefs = Array.from(new Set(nodes.map((n) => n.caseRef || "").filter(Boolean)));
+  const clusterCenters = new Map<string, { x: number; y: number }>();
+  const gridCols = Math.ceil(Math.sqrt(Math.max(caseRefs.length, 1)));
+  const cellSize = 100; // increase this for bigger gaps between cases
+
+  caseRefs.forEach((ref, i) => {
+    clusterCenters.set(ref, {
+      x: (i % gridCols) * cellSize,
+      y: Math.floor(i / gridCols) * cellSize,
+    });
+  });
+
+  const centerFor = (n: { caseRef?: string }) =>
+    n.caseRef && clusterCenters.has(n.caseRef) ? clusterCenters.get(n.caseRef)! : { x: 0, y: 0 };
+
+  const positions = new Map<string, { x: number; y: number; fixed: boolean }>();
+
+  nodes.forEach((n) => {
+    if (Number.isFinite(n.x) && Number.isFinite(n.y)) {
+      positions.set(n.id, { x: n.x as number, y: n.y as number, fixed: true });
+      return;
+    }
+    const home = centerFor(n);
+    const rng = seededRandom(n.id);
+    const angle = rng() * 2 * Math.PI;
+    const radius = 40 + rng() * 100;
+    positions.set(n.id, { x: home.x + radius * Math.cos(angle), y: home.y + radius * Math.sin(angle), fixed: false });
+  });
+
+  const idList = nodes.map((n) => n.id);
+  const caseKeys = nodes.map((n) => n.caseRef ?? "");
+  const edgeList = edges.filter((e) => positions.has(e.from) && positions.has(e.to));
+
+  const scaleFactor = Math.max(1, 12 / count);
+  const REPULSION = 9000 * scaleFactor;
+  const SPRING_LENGTH = 160;
+  const SPRING_STRENGTH = 0.02;
+  const CLUSTER_PULL = 0.035;
+  const ITERATIONS = 300;
+
+  for (let iter = 0; iter < ITERATIONS; iter++) {
+    const forces = new Map<string, { x: number; y: number }>();
+    idList.forEach((id) => forces.set(id, { x: 0, y: 0 }));
+
+    for (let i = 0; i < idList.length; i++) {
+      for (let j = i + 1; j < idList.length; j++) {
+        const a = positions.get(idList[i])!;
+        const b = positions.get(idList[j])!;
+        const dx = a.x - b.x, dy = a.y - b.y;
+        const distSq = Math.max(dx * dx + dy * dy, 1);
+        const dist = Math.sqrt(distSq);
+        const sameCase = !caseKeys[i] || !caseKeys[j] || caseKeys[i] === caseKeys[j];
+        const boost = sameCase ? 1 : 6;
+        const force = (REPULSION * boost) / distSq;
+        const fx = (dx / dist) * force, fy = (dy / dist) * force;
+        forces.get(idList[i])!.x += fx; forces.get(idList[i])!.y += fy;
+        forces.get(idList[j])!.x -= fx; forces.get(idList[j])!.y -= fy;
+      }
+    }
+
+    edgeList.forEach((e) => {
+      const a = positions.get(e.from)!, b = positions.get(e.to)!;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+      const force = (dist - SPRING_LENGTH) * SPRING_STRENGTH;
+      const fx = (dx / dist) * force, fy = (dy / dist) * force;
+      forces.get(e.from)!.x += fx; forces.get(e.from)!.y += fy;
+      forces.get(e.to)!.x -= fx; forces.get(e.to)!.y -= fy;
+    });
+
+    nodes.forEach((n) => {
+      const p = positions.get(n.id)!;
+      const f = forces.get(n.id)!;
+      const home = centerFor(n);
+      f.x += (home.x - p.x) * CLUSTER_PULL;
+      f.y += (home.y - p.y) * CLUSTER_PULL;
+    });
+
+    idList.forEach((id) => {
+      const p = positions.get(id)!;
+      if (p.fixed) return;
+      const f = forces.get(id)!;
+      p.x += Math.max(-40, Math.min(40, f.x));
+      p.y += Math.max(-40, Math.min(40, f.y));
+    });
+  }
+
+  return nodes.map((n) => {
+    const p = positions.get(n.id)!;
+    return { id: n.id, label: n.label, type: n.type, risk: n.risk ?? 50, role: n.role ?? "Unknown", caseRef: n.caseRef, x: p.x, y: p.y };
   });
 }
-type UiGraphNode = ReturnType<typeof layoutGraphNodes>[number];
+type UiGraphNode = ReturnType<typeof forceLayoutNodes>[number];
 
 const TIMELINE_EVENTS = [
   { date: "Nov 28", time: "08:14", label: "Wire transfer $2.4M", type: "financial", entity: "Ahmed Khan" },
@@ -2459,23 +2554,123 @@ function resolveExplicitType(candidates: unknown[]): unknown {
   return undefined;
 }
 
+// ---------------------------------------------------------------------
+// Graph response
+//
+// New backend response is expected to contain:
+//
+// {
+//   graph: [...],
+//   scope: ...
+// }
+//
+// We also keep compatibility with a response that directly contains
+// nodes/edges.
+// ---------------------------------------------------------------------
+
+function extractGraphNodesAndEdges(graphData: Record<string, any>) {
+  const rawGraph = Array.isArray(graphData?.graph) ? graphData.graph : [];
+  const rawNodes = Array.isArray(graphData?.nodes) ? graphData.nodes : [];
+  const rawEdges = Array.isArray(graphData?.edges) ? graphData.edges : [];
+
+  let graphNodes: any[] = [];
+  let graphEdges: any[] = [];
+
+  if (rawNodes.length > 0) {
+    graphNodes = rawNodes;
+    graphEdges = rawEdges;
+  } else if (rawGraph.length > 0) {
+    const nodeMap = new Map<string, any>();
+
+    rawGraph.forEach((item: any) => {
+      if (!item || typeof item !== "object") return;
+
+      const sourceName = item.source_name ?? item.source ?? item.entity_a ?? item.from;
+      const targetName = item.target_name ?? item.target ?? item.entity_b ?? item.to;
+
+      const sourceTypeRaw = resolveExplicitType([
+        item.source_type, item.source_entity_type, item.sourceType,
+        item.source_category, item.entity_type, item.type,
+      ]);
+      const targetTypeRaw = resolveExplicitType([
+        item.target_type, item.target_entity_type, item.targetType,
+        item.target_category, item.entity_type, item.type,
+      ]);
+
+      const sourceType = guessEntityType(sourceTypeRaw, typeof sourceName === "string" ? sourceName : "");
+      const targetType = guessEntityType(targetTypeRaw, typeof targetName === "string" ? targetName : "");
+
+      const relationship = item.relationship_type ?? item.relation_type ?? item.relation ?? item.label ?? "";
+
+      if (typeof sourceName === "string" && sourceName.trim()) {
+        if (!nodeMap.has(sourceName)) {
+          nodeMap.set(sourceName, {
+            id: sourceName, name: sourceName, entity_name: sourceName,
+            entity_type: sourceType, type: sourceType,
+            risk: Number(item.source_risk ?? item.risk ?? 0),
+          });
+        }
+      }
+      if (typeof targetName === "string" && targetName.trim()) {
+        if (!nodeMap.has(targetName)) {
+          nodeMap.set(targetName, {
+            id: targetName, name: targetName, entity_name: targetName,
+            entity_type: targetType, type: targetType,
+            risk: Number(item.target_risk ?? item.risk ?? 0),
+          });
+        }
+      }
+      if (typeof sourceName === "string" && typeof targetName === "string" && sourceName.trim() && targetName.trim()) {
+        graphEdges.push({ from: sourceName, to: targetName, label: relationship });
+      }
+    });
+
+    graphNodes = Array.from(nodeMap.values());
+  }
+
+  return { graphNodes, graphEdges };
+}
+
+// Different cases can reuse the same entity name (e.g. two cases both
+// having a "Local Operative"). Prefixing every id with its case keeps
+// them as separate nodes instead of silently merging into one.
+function prefixRawEntityIds(graphNodes: any[], graphEdges: any[], caseId: string) {
+  const resolveId = (n: any) =>
+    String(n.id ?? n.entity_id ?? n.entity_name ?? n.name ?? n.label ?? "unknown");
+
+  const idMap = new Map<string, string>();
+  graphNodes.forEach((n) => {
+    idMap.set(resolveId(n), `${caseId}::${resolveId(n)}`);
+  });
+
+  const prefixedNodes = graphNodes.map((n) => ({
+    ...n,
+    id: idMap.get(resolveId(n)),
+    case_id: caseId,
+  }));
+
+  const prefixedEdges = graphEdges.map((e: any) => {
+    const from = e.from ?? e.source ?? e.source_name ?? e.entity_a;
+    const to = e.to ?? e.target ?? e.target_name ?? e.entity_b;
+    return {
+      ...e,
+      from: idMap.get(String(from)) ?? `${caseId}::${from}`,
+      to: idMap.get(String(to)) ?? `${caseId}::${to}`,
+    };
+  });
+
+  return { nodes: prefixedNodes, edges: prefixedEdges };
+}
+
 function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCaseId: (id: string) => void }) {
   const hasSession = api.hasSession();
-
   const ALL_CASES_OPTION = "All Cases";
-
   const [selected, setSelected] = useState<UiGraphNode | null>(null);
-
   const [tab, setTab] = useState<"graph" | "timeline" | "map">("graph");
-
   const [filterType, setFilterType] = useState("All");
-
   const [zoom, setZoom] = useState(1);
-
   const [pan, setPan] = useState({ x: 0, y: 0 });
-
   const dragging = useRef(false);
-
   const lastMouse = useRef({ x: 0, y: 0 });
 
   // ---------------------------------------------------------------------------
@@ -2572,54 +2767,49 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
   // Auto-fit the graph layout to the canvas whenever a new set of nodes
   // loads (or the canvas resizes). Must come after `nodes` is declared
   // above, since it reads from that state.
+  const graphViewportRef = useRef(graphViewport);
+  useEffect(() => {
+    graphViewportRef.current = graphViewport;
+  }, [graphViewport]);
+
   useEffect(() => {
     const withCoords = nodes.filter(
       (n) => Number.isFinite(n.x) && Number.isFinite(n.y)
     );
-
     if (withCoords.length === 0) return;
+
+    const { width, height } = graphViewportRef.current;
 
     const xs = withCoords.map((n) => n.x as number);
     const ys = withCoords.map((n) => n.y as number);
-
     const minX = Math.min(...xs);
     const maxX = Math.max(...xs);
     const minY = Math.min(...ys);
     const maxY = Math.max(...ys);
-
     const bboxWidth = Math.max(maxX - minX, 1);
     const bboxHeight = Math.max(maxY - minY, 1);
 
-    // Room for node radius, labels below nodes, and the legend overlay.
     const PADDING = 90;
-
-    const availableWidth = Math.max(
-      graphViewport.width - PADDING * 2,
-      100
-    );
-    const availableHeight = Math.max(
-      graphViewport.height - PADDING * 2,
-      100
-    );
+    const availableWidth = Math.max(width - PADDING * 2, 100);
+    const availableHeight = Math.max(height - PADDING * 2, 100);
 
     const fitZoom = Math.min(
       availableWidth / bboxWidth,
       availableHeight / bboxHeight,
-      2 // never zoom in further than the manual zoom-in cap
+      2
     );
-
-    const clampedZoom = Math.max(0.5, Math.min(2, fitZoom));
+    const BOOST = 1.25; // makes the initial view ~25% larger than a tight fit
+    const clampedZoom = Math.max(0.15, Math.min(2, fitZoom * BOOST));
 
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
 
-    // Matches the render transform: translate(pan.x + 40, pan.y + 40) scale(zoom)
     setZoom(clampedZoom);
     setPan({
-      x: graphViewport.width / 2 - 40 - centerX * clampedZoom,
-      y: graphViewport.height / 2 - 40 - centerY * clampedZoom,
+      x: width / 2 - 40 - centerX * clampedZoom,
+      y: height / 2 - 40 - centerY * clampedZoom,
     });
-  }, [nodes, graphViewport.width, graphViewport.height]);
+  }, [nodes]);   
 
   const [graphLoading, setGraphLoading] = useState(false);
 
@@ -2731,288 +2921,68 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
     setGraphLoading(true);
     setGraphError(null);
 
-    Promise.all([
-      AIApi.getCaseGraph(effectiveCaseId),
-      AIApi.getCaseInfluencers(effectiveCaseId),
-    ])
-      .then(([graph, infl]) => {
-        if (cancelled) return;
-
-        // ---------------------------------------------------------------------
-        // Graph response
-        //
-        // New backend response is expected to contain:
-        //
-        // {
-        //   graph: [...],
-        //   scope: ...
-        // }
-        //
-        // We also keep compatibility with a response that directly contains
-        // nodes/edges.
-        // ---------------------------------------------------------------------
-
-        const graphData = graph as Record<string, any>;
-
-        const rawGraph = Array.isArray(graphData?.graph)
-          ? graphData.graph
-          : [];
-
-        const rawNodes = Array.isArray(graphData?.nodes)
-          ? graphData.nodes
-          : [];
-
-        const rawEdges = Array.isArray(graphData?.edges)
-          ? graphData.edges
-          : [];
-
-        // ---------------------------------------------------------------------
-        // If backend gives graph relationship rows, convert them into nodes
-        // and edges.
-        // ---------------------------------------------------------------------
-
-        let graphNodes: any[] = [];
-        let graphEdges: any[] = [];
-
-        if (rawNodes.length > 0) {
-          graphNodes = rawNodes;
-          graphEdges = rawEdges;
-        } else if (rawGraph.length > 0) {
-          const nodeMap = new Map<string, any>();
-
-          rawGraph.forEach((item: any) => {
-            if (!item || typeof item !== "object") return;
-
-            const sourceName =
-              item.source_name ??
-              item.source ??
-              item.entity_a ??
-              item.from;
-
-            const targetName =
-              item.target_name ??
-              item.target ??
-              item.entity_b ??
-              item.to;
-
-            const sourceTypeRaw = resolveExplicitType([
-              item.source_type,
-              item.source_entity_type,
-              item.sourceType,
-              item.source_category,
-              item.entity_type,
-              item.type,
-            ]);
-
-            const targetTypeRaw = resolveExplicitType([
-              item.target_type,
-              item.target_entity_type,
-              item.targetType,
-              item.target_category,
-              item.entity_type,
-              item.type,
-            ]);
-
-            const sourceType = guessEntityType(
-              sourceTypeRaw,
-              typeof sourceName === "string" ? sourceName : ""
-            );
-
-            const targetType = guessEntityType(
-              targetTypeRaw,
-              typeof targetName === "string" ? targetName : ""
-            );
-
-            const relationship =
-              item.relationship_type ??
-              item.relation_type ??
-              item.relation ??
-              item.label ??
-              "";
-
-            if (typeof sourceName === "string" && sourceName.trim()) {
-              if (!nodeMap.has(sourceName)) {
-                nodeMap.set(sourceName, {
-                  id: sourceName,
-                  name: sourceName,
-                  entity_name: sourceName,
-                  entity_type: sourceType,
-                  type: sourceType,
-                  risk: Number(item.source_risk ?? item.risk ?? 0),
-                });
-              }
-            }
-
-            if (typeof targetName === "string" && targetName.trim()) {
-              if (!nodeMap.has(targetName)) {
-                nodeMap.set(targetName, {
-                  id: targetName,
-                  name: targetName,
-                  entity_name: targetName,
-                  entity_type: targetType,
-                  type: targetType,
-                  risk: Number(item.target_risk ?? item.risk ?? 0),
-                });
-              }
-            }
-
-            if (
-              typeof sourceName === "string" &&
-              typeof targetName === "string" &&
-              sourceName.trim() &&
-              targetName.trim()
-            ) {
-              graphEdges.push({
-                from: sourceName,
-                to: targetName,
-                label: relationship,
-              });
-            }
-          });
-
-          graphNodes = Array.from(nodeMap.values());
-        }
-
-        // ---------------------------------------------------------------------
-        // Normalize nodes into the UI shape.
-        // ---------------------------------------------------------------------
-
-        const normalizedNodes: UiGraphNode[] = graphNodes.map(
-          (rawNode: any) => {
-            const explicitType = resolveExplicitType([
-              rawNode.type,
-              rawNode.entity_type,
-              rawNode.entityType,
-              rawNode.node_type,
-              rawNode.nodeType,
-              rawNode.category,
-              rawNode.classification,
-            ]);
-
-            const name =
-              rawNode.label ??
-              rawNode.name ??
-              rawNode.entity_name ??
-              rawNode.entityName ??
-              rawNode.id ??
-              "Unknown";
-
-            const type = guessEntityType(explicitType, String(name));
-
-            return {
-              ...rawNode,
-              id: String(
-                rawNode.id ??
-                  rawNode.entity_id ??
-                  rawNode.entity_name ??
-                  rawNode.name ??
-                  name
-              ),
-              label: String(name),
-              type,
-              role: String(
-                rawNode.role ??
-                  rawNode.entity_role ??
-                  rawNode.description ??
-                  ""
-              ),
-              risk: Math.max(
-                0,
-                Math.min(
-                  100,
-                  Number(
-                    rawNode.risk ??
-                      rawNode.risk_score ??
-                      rawNode.priority_score ??
-                      0
-                  )
-                )
-              ),
-              x:
-                Number.isFinite(Number(rawNode.x)) &&
-                Number.isFinite(Number(rawNode.y))
-                  ? Number(rawNode.x)
-                  : undefined,
-              y:
-                Number.isFinite(Number(rawNode.x)) &&
-                Number.isFinite(Number(rawNode.y))
-                  ? Number(rawNode.y)
-                  : undefined,
-            } as UiGraphNode;
+    const graphPromise = effectiveCaseId
+      ? AIApi.getCaseGraph(effectiveCaseId).then((graph) => {
+          const graphData = graph as Record<string, any>;
+          return extractGraphNodesAndEdges(graphData);
+        })
+      : Promise.all(caseOptions.map((c) => AIApi.getCaseGraph(c.id).catch(() => null))).then(
+          (perCaseGraphs) => {
+            let graphNodes: any[] = [];
+            let graphEdges: any[] = [];
+            perCaseGraphs.forEach((graph, i) => {
+              if (!graph) return;
+              const graphData = graph as Record<string, any>;
+              const extracted = extractGraphNodesAndEdges(graphData);
+              const prefixed = prefixRawEntityIds(extracted.graphNodes, extracted.graphEdges, caseOptions[i].id);
+              graphNodes = graphNodes.concat(prefixed.nodes);
+              graphEdges = graphEdges.concat(prefixed.edges);
+            });
+            return { graphNodes, graphEdges };
           }
         );
 
-        // ---------------------------------------------------------------------
-        // Use your existing circular fallback layout when backend doesn't
-        // provide coordinates.
-        // ---------------------------------------------------------------------
-
-        const laidOutNodes = layoutGraphNodes(normalizedNodes);
-
-        setNodes(laidOutNodes);
-
-        // ---------------------------------------------------------------------
-        // Normalize edges.
-        // ---------------------------------------------------------------------
+    Promise.all([graphPromise, AIApi.getCaseInfluencers(effectiveCaseId)])
+      .then(([{ graphNodes, graphEdges }, infl]) => {
+        if (cancelled) return;
 
         const normalizedEdges = graphEdges
           .map((e: any) => {
-            const from =
-              e.from ??
-              e.source ??
-              e.source_name ??
-              e.entity_a;
-
-            const to =
-              e.to ??
-              e.target ??
-              e.target_name ??
-              e.entity_b;
-
-            const label =
-              e.label ??
-              e.relationship_type ??
-              e.relation_type ??
-              e.relation ??
-              "";
-
-            if (
-              typeof from !== "string" ||
-              typeof to !== "string"
-            ) {
-              return null;
-            }
-
-            return {
-              from,
-              to,
-              label: String(label),
-            };
+            const from = e.from ?? e.source ?? e.source_name ?? e.entity_a;
+            const to = e.to ?? e.target ?? e.target_name ?? e.entity_b;
+            const label = e.label ?? e.relationship_type ?? e.relation_type ?? e.relation ?? "";
+            if (typeof from !== "string" || typeof to !== "string") return null;
+            return { from, to, label: String(label) };
           })
-          .filter(
-            (
-              e
-            ): e is {
-              from: string;
-              to: string;
-              label: string;
-            } => e !== null
-          );
+          .filter((e): e is { from: string; to: string; label: string } => e !== null);
 
+        const normalizedNodes: UiGraphNode[] = graphNodes.map((rawNode: any) => {
+          const explicitType = resolveExplicitType([
+            rawNode.type, rawNode.entity_type, rawNode.entityType,
+            rawNode.node_type, rawNode.nodeType, rawNode.category, rawNode.classification,
+          ]);
+          const name = rawNode.label ?? rawNode.name ?? rawNode.entity_name ?? rawNode.entityName ?? rawNode.id ?? "Unknown";
+          const type = guessEntityType(explicitType, String(name));
+
+          return {
+            ...rawNode,
+            id: String(rawNode.id ?? rawNode.entity_id ?? rawNode.entity_name ?? rawNode.name ?? name),
+            label: String(name),
+            type,
+            role: String(rawNode.role ?? rawNode.entity_role ?? rawNode.description ?? ""),
+            risk: Math.max(0, Math.min(100, Number(rawNode.risk ?? rawNode.risk_score ?? rawNode.priority_score ?? 0))),
+            caseRef: String(rawNode.case_id ?? rawNode.caseId ?? rawNode.case ?? ""),
+            x: Number.isFinite(Number(rawNode.x)) && Number.isFinite(Number(rawNode.y)) ? Number(rawNode.x) : undefined,
+            y: Number.isFinite(Number(rawNode.x)) && Number.isFinite(Number(rawNode.y)) ? Number(rawNode.y) : undefined,
+          } as UiGraphNode;
+        });
+
+        const laidOutNodes = forceLayoutNodes(normalizedNodes, normalizedEdges);
+        setNodes(laidOutNodes);
         setEdges(normalizedEdges);
 
-        // ---------------------------------------------------------------------
-        // Influencers
-        //
-        // Backend may return:
-        //   { influencers: [...] }
-        //
-        // or directly:
-        //   [...]
-        // ---------------------------------------------------------------------
-
+        // ---- KEEP YOUR ORIGINAL INFLUENCER CODE HERE, UNCHANGED ----
         const influencerData = infl as any;
-
         const normalizedInfluencers = Array.isArray(influencerData)
           ? influencerData
           : Array.isArray(influencerData?.influencers)
@@ -3022,41 +2992,17 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
         setInfluencers(
           normalizedInfluencers.map((inf: any) => ({
             ...inf,
-            name: String(
-              inf.name ??
-                inf.entity_name ??
-                inf.entityName ??
-                inf.label ??
-                "Unknown"
-            ),
-            score: Math.max(
-              0,
-              Math.min(
-                100,
-                Number(
-                  inf.score ??
-                    inf.influence_score ??
-                    inf.priority_score ??
-                    inf.degree ??
-                    0
-                )
-              )
-            ),
+            name: String(inf.name ?? inf.entity_name ?? inf.entityName ?? inf.label ?? "Unknown"),
+            score: Math.max(0, Math.min(100, Number(inf.score ?? inf.influence_score ?? inf.priority_score ?? inf.degree ?? 0))),
           }))
         );
       })
       .catch((error) => {
         if (cancelled) return;
-
         setNodes([]);
         setEdges([]);
         setInfluencers([]);
-
-        setGraphError(
-          error instanceof Error
-            ? error.message
-            : "Couldn't load the network graph."
-        );
+        setGraphError(error instanceof Error ? error.message : "Couldn't load the network graph.");
       })
       .finally(() => {
         if (!cancelled) {
@@ -3067,7 +3013,7 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
     return () => {
       cancelled = true;
     };
-  }, [caseId, hasSession]);
+  }, [caseId, hasSession, caseOptions]);
 
   // ---------------------------------------------------------------------------
   // Priority / Suspect ranking
@@ -3300,7 +3246,7 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
 
     setZoom((z) =>
       Math.max(
-        0.5,
+        0.15,
         Math.min(
           2,
           z - e.deltaY * 0.001
@@ -3549,17 +3495,13 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
 
   return (
     <div
-      style={{
-        display: "flex",
-        flex: 1,
-        overflow: "hidden",
-        // Anchors this component's box as the positioning context, so any
-        // stray absolute/fixed-positioned descendant (from this component
-        // or elsewhere) is contained to this area instead of covering the
-        // full viewport when a node is selected.
-        position: "relative",
-      }}
-    >
+    style={{
+      display: "flex",
+      height: "calc(100vh - 73px)",
+      overflow: "hidden",
+      position: "relative",
+    }}
+  >
       {/* =====================================================================
           MAIN CONTENT
           ===================================================================== */}
@@ -3570,6 +3512,7 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
+          minHeight: 0,
         }}
       >
         {/* ===================================================================
@@ -3819,7 +3762,7 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
                 onClick={() =>
                   setZoom((z) =>
                     Math.max(
-                      0.5,
+                      0.15,
                       z - 0.1
                     )
                   )
@@ -4977,18 +4920,19 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
       <div
         style={{
           width: 280,
-          borderLeft:
-            "1px solid #0f1e36",
+          minWidth: 280,
+          maxWidth: 280,
+          flexShrink: 0,
+          minHeight: 0,
+          boxSizing: "border-box",
+          borderLeft: "1px solid #0f1e36",
           display: "flex",
-          flexDirection:
-            "column",
-          background:
-            "#070e1b",
-          overflow:
-            "hidden",
+          flexDirection: "column",
+          background: "#070e1b",
+          overflow: "hidden",
         }}
       >
-        {/* ===================================================================
+      {/* ===================================================================
             ENTITY DETAIL
             =================================================================== */}
 
@@ -4996,288 +4940,308 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
           <div
             style={{
               flex: 1,
-              overflowY:
-                "auto",
+              minHeight: 0,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
             }}
           >
-            <div
-              style={{
-                padding: 16,
-                borderBottom:
-                  "1px solid #0f1e36",
-                display:
-                  "flex",
-                justifyContent:
-                  "space-between",
-                alignItems:
-                  "center",
-              }}
-            >
-              <h3
-                style={{
-                  fontFamily:
-                    "Rajdhani",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  letterSpacing:
-                    "0.08em",
-                  textTransform:
-                    "uppercase",
-                  color:
-                    "#64748b",
-                  margin: 0,
-                }}
-              >
-                Entity Detail
-              </h3>
-
-              <button
-                onClick={() =>
-                  setSelected(
-                    null
-                  )
-                }
-                style={{
-                  background:
-                    "none",
-                  border:
-                    "none",
-                  color:
-                    "#475569",
-                  cursor:
-                    "pointer",
-                }}
-              >
-                <Icon
-                  name="close"
-                  size={16}
-                />
-              </button>
-            </div>
-
-            <div
-              style={{
-                padding:
-                  "20px 16px",
-                borderBottom:
-                  "1px solid #0f1e36",
-              }}
-            >
+            {/* Fixed, non-scrolling part */}
+            <div style={{ flexShrink: 0 }}>
               <div
                 style={{
+                  padding: 16,
+                  borderBottom:
+                    "1px solid #0f1e36",
                   display:
                     "flex",
+                  justifyContent:
+                    "space-between",
                   alignItems:
                     "center",
-                  gap: 12,
-                  marginBottom:
-                    16,
+                }}
+              >
+                <h3
+                  style={{
+                    fontFamily:
+                      "Rajdhani",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    letterSpacing:
+                      "0.08em",
+                    textTransform:
+                      "uppercase",
+                    color:
+                      "#64748b",
+                    margin: 0,
+                  }}
+                >
+                  Entity Detail
+                </h3>
+
+                <button
+                  onClick={() =>
+                    setSelected(
+                      null
+                    )
+                  }
+                  style={{
+                    background:
+                      "none",
+                    border:
+                      "none",
+                    color:
+                      "#475569",
+                    cursor:
+                      "pointer",
+                  }}
+                >
+                  <Icon
+                    name="close"
+                    size={16}
+                  />
+                </button>
+              </div>
+
+              <div
+                style={{
+                  padding:
+                    "20px 16px",
+                  borderBottom:
+                    "1px solid #0f1e36",
                 }}
               >
                 <div
                   style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius:
-                      selected.type ===
-                      "location"
-                        ? 8
-                        : "50%",
-                    background: `${
-                      typeColors[
-                        selected.type
-                      ]
-                    }18`,
-                    border: `1.5px solid ${
-                      typeColors[
-                        selected.type
-                      ]
-                    }44`,
                     display:
                       "flex",
                     alignItems:
                       "center",
-                    justifyContent:
-                      "center",
-                    color:
-                      typeColors[
-                        selected.type
-                      ],
-                    flexShrink: 0,
+                    gap: 12,
+                    marginBottom:
+                      16,
                   }}
                 >
-                  <Icon
-                    name={
-                      selected.type ===
-                      "person"
-                        ? "user"
-                        : selected.type ===
-                            "org"
-                          ? "cases"
-                          : "map"
-                    }
-                    size={20}
-                  />
-                </div>
-
-                <div>
-                  <p
+                  <div
                     style={{
-                      fontSize: 16,
-                      fontFamily:
-                        "Rajdhani",
-                      fontWeight:
-                        700,
-                      color:
-                        "#e2e8f0",
-                      margin: 0,
-                    }}
-                  >
-                    {
-                      selected.label
-                    }
-                  </p>
-
-                  <span
-                    className="badge badge-info"
-                    style={{
-                      marginTop: 4,
+                      width: 48,
+                      height: 48,
+                      borderRadius:
+                        selected.type ===
+                        "location"
+                          ? 8
+                          : "50%",
+                      background: `${
+                        typeColors[
+                          selected.type
+                        ]
+                      }18`,
+                      border: `1.5px solid ${
+                        typeColors[
+                          selected.type
+                        ]
+                      }44`,
                       display:
-                        "inline-block",
-                      textTransform:
-                        "capitalize",
+                        "flex",
+                      alignItems:
+                        "center",
+                      justifyContent:
+                        "center",
+                      color:
+                        typeColors[
+                          selected.type
+                        ],
+                      flexShrink: 0,
                     }}
                   >
-                    {
-                      selected.type
-                    }
-                  </span>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display:
-                    "flex",
-                  flexDirection:
-                    "column",
-                  gap: 8,
-                }}
-              >
-                {[
-                  {
-                    k: "Role",
-                    v:
-                      selected.role ||
-                      "—",
-                  },
-                  {
-                    k: "Node ID",
-                    v: selected.id,
-                  },
-                  {
-                    k: "Risk Score",
-                    v: `${selected.risk}/100`,
-                  },
-                ].map(
-                  (row) => (
-                    <div
-                      key={
-                        row.k
+                    <Icon
+                      name={
+                        selected.type ===
+                        "person"
+                          ? "user"
+                          : selected.type ===
+                              "org"
+                            ? "cases"
+                            : "map"
                       }
+                      size={20}
+                    />
+                  </div>
+
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p
                       style={{
-                        display:
-                          "flex",
-                        justifyContent:
-                          "space-between",
+                        fontSize: 16,
+                        fontFamily:
+                          "Rajdhani",
+                        fontWeight:
+                          700,
+                        color:
+                          "#e2e8f0",
+                        margin: 0,
+                        overflowWrap: "break-word",
+                        wordBreak: "break-word",
                       }}
                     >
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color:
-                            "#475569",
-                          fontFamily:
-                            "Rajdhani",
-                          fontWeight:
-                            600,
-                          letterSpacing:
-                            "0.06em",
-                          textTransform:
-                            "uppercase",
-                        }}
-                      >
-                        {
-                          row.k
-                        }
-                      </span>
+                      {
+                        selected.label
+                      }
+                    </p>
 
-                      <span
-                        style={{
-                          fontSize: 12,
-                          fontFamily:
-                            "JetBrains Mono",
-                          color:
-                            row.k ===
-                            "Risk Score"
-                              ? selected.risk >
-                                80
-                                ? "#ef4444"
-                                : selected.risk >
-                                    60
-                                  ? "#f59e0b"
-                                  : "#22c55e"
-                              : "#94a3b8",
-                        }}
-                      >
-                        {
-                          row.v
-                        }
-                      </span>
-                    </div>
-                  )
-                )}
-              </div>
+                    <span
+                      className="badge badge-info"
+                      style={{
+                        marginTop: 4,
+                        display:
+                          "inline-block",
+                        textTransform:
+                          "capitalize",
+                      }}
+                    >
+                      {
+                        selected.type
+                      }
+                    </span>
+                  </div>
+                </div>
 
-              <div
-                style={{
-                  marginTop: 14,
-                  height: 6,
-                  background:
-                    "#0f1e36",
-                  borderRadius: 3,
-                  overflow:
-                    "hidden",
-                }}
-              >
                 <div
                   style={{
-                    height:
-                      "100%",
-                    width: `${selected.risk}%`,
+                    display:
+                      "flex",
+                    flexDirection:
+                      "column",
+                    gap: 8,
+                  }}
+                >
+                  {[
+                    {
+                      k: "Role",
+                      v:
+                        selected.role ||
+                        "—",
+                    },
+                    {
+                      k: "Node ID",
+                      v: selected.id,
+                    },
+                    {
+                      k: "Risk Score",
+                      v: `${selected.risk}/100`,
+                    },
+                  ].map(
+                    (row) => (
+                      <div
+                        key={
+                          row.k
+                        }
+                        style={{
+                          display:
+                            "flex",
+                          justifyContent:
+                            "space-between",
+                          gap: 10,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color:
+                              "#475569",
+                            fontFamily:
+                              "Rajdhani",
+                            fontWeight:
+                              600,
+                            letterSpacing:
+                              "0.06em",
+                            textTransform:
+                              "uppercase",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {
+                            row.k
+                          }
+                        </span>
+
+                        <span
+                          title={row.v}
+                          style={{
+                            fontSize: 12,
+                            fontFamily:
+                              "JetBrains Mono",
+                            color:
+                              row.k ===
+                              "Risk Score"
+                                ? selected.risk >
+                                  80
+                                  ? "#ef4444"
+                                  : selected.risk >
+                                      60
+                                    ? "#f59e0b"
+                                    : "#22c55e"
+                                : "#94a3b8",
+                            minWidth: 0,
+                            flex: "1 1 auto",
+                            textAlign: "right",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {
+                            row.v
+                          }
+                        </span>
+                      </div>
+                    )
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 14,
+                    height: 6,
                     background:
-                      `linear-gradient(90deg, #22c55e, ${
-                        selected.risk >
-                        60
-                          ? "#f59e0b"
-                          : "#22c55e"
-                      }, ${
-                        selected.risk >
-                        80
-                          ? "#ef4444"
-                          : selected.risk >
-                              60
+                      "#0f1e36",
+                    borderRadius: 3,
+                    overflow:
+                      "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      height:
+                        "100%",
+                      width: `${selected.risk}%`,
+                      background:
+                        `linear-gradient(90deg, #22c55e, ${
+                          selected.risk >
+                          60
                             ? "#f59e0b"
                             : "#22c55e"
-                      })`,
-                    borderRadius: 3,
-                  }}
-                />
+                        }, ${
+                          selected.risk >
+                          80
+                            ? "#ef4444"
+                            : selected.risk >
+                                60
+                              ? "#f59e0b"
+                              : "#22c55e"
+                        })`,
+                      borderRadius: 3,
+                    }}
+                  />
+                </div>
               </div>
             </div>
 
+            {/* Scrolling part — capped height, independent scroll */}
             <div
               style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
                 padding: 16,
               }}
             >
@@ -5445,8 +5409,8 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
           <div
             style={{
               flex: 1,
-              overflowY:
-                "auto",
+              overflowY:"auto",
+              minHeight: 0,
             }}
           >
             {/* ===============================================================
@@ -6398,6 +6362,7 @@ function ReportsPage({ role, caseId, onChangeCaseId }: { role: Role; caseId: str
 
 // ─── Page titles ──────────────────────────────────────────────────────────────
 const PAGE_TITLES: Record<Page, string> = {
+  landing: "Home",
   login: "Login",
   signup: "Create Account",
   dashboard: "Dashboard",
@@ -6410,7 +6375,7 @@ const PAGE_TITLES: Record<Page, string> = {
 
 // ─── App Shell ────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState<Page>("login");
+  const [page, setPage] = useState<Page>("landing");
   const [role, setRole] = useState<Role>("Senior Investigator");
   const [apiUser, setApiUser] = useState<ApiUser | null>(null);
   const [hydrating, setHydrating] = useState(true);
@@ -6459,6 +6424,10 @@ export default function App() {
     );
   }
 
+  if (page === "landing") {
+    return <LandingPage onEnterApp={() => setPage("login")} />;
+  }
+
   if (page === "login") {
     return <LoginPage onLogin={handleLogin} onGoToSignup={() => setPage("signup")} />;
   }
@@ -6475,10 +6444,10 @@ export default function App() {
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#050a12" }}>
       <Sidebar page={page} setPage={setPage} role={role} apiUser={apiUser} onLogout={handleLogout} />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
         <TopBar title={PAGE_TITLES[page]} setPage={setPage} />
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div style={{ flex: 1, overflow: "auto" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
+          <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
             {page === "dashboard" && <Dashboard setPage={setPage} />}
             {page === "cases" && <CaseManagement setPage={setPage} role={role} onOpenCase={openCaseNetwork} />}
             {page === "upload" && <DataUpload />}
