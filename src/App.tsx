@@ -7,7 +7,7 @@ import LandingPage from "./landing/LandingPage";
 // ─── Assets ───────────────────────────────────────────────────────────────────
 // Served from /public. BASE_URL keeps this correct when Vite builds under a
 // non-root base (see FIGMA_PUBLIC_URL in vite.config.ts).
-const LOGO_SRC = `${import.meta.env.BASE_URL}logo-wordmark.png`;
+import LOGO_SRC from "./assets/logo-wordmark.png";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "landing" | "login" | "signup" | "dashboard" | "cases" | "upload" | "network" | "alerts" | "reports";
@@ -116,6 +116,7 @@ function forceLayoutNodes(
   const count = Math.max(nodes.length, 1);
 
   const caseRefs = Array.from(new Set(nodes.map((n) => n.caseRef || "").filter(Boolean)));
+  const isSingleCase = caseRefs.length <= 1;
   const clusterCenters = new Map<string, { x: number; y: number }>();
   const gridCols = Math.ceil(Math.sqrt(Math.max(caseRefs.length, 1)));
   const cellSize = 100; // increase this for bigger gaps between cases
@@ -148,10 +149,10 @@ function forceLayoutNodes(
   const caseKeys = nodes.map((n) => n.caseRef ?? "");
   const edgeList = edges.filter((e) => positions.has(e.from) && positions.has(e.to));
 
-  const scaleFactor = Math.max(1, 12 / count);
-  const REPULSION = 9000 * scaleFactor;
-  const SPRING_LENGTH = 160;
-  const SPRING_STRENGTH = 0.02;
+  const scaleFactor = Math.max(1, 18 / count);
+  const REPULSION = 11000 * scaleFactor;
+  const SPRING_LENGTH = 220;
+  const SPRING_STRENGTH = 0.015;
   const CLUSTER_PULL = 0.035;
   const ITERATIONS = 300;
 
@@ -186,11 +187,13 @@ function forceLayoutNodes(
     });
 
     nodes.forEach((n) => {
-      const p = positions.get(n.id)!;
-      const f = forces.get(n.id)!;
+    const p = positions.get(n.id)!;
+    const f = forces.get(n.id)!;
+    if (!isSingleCase) {
       const home = centerFor(n);
       f.x += (home.x - p.x) * CLUSTER_PULL;
       f.y += (home.y - p.y) * CLUSTER_PULL;
+    }
     });
 
     idList.forEach((id) => {
@@ -2672,6 +2675,7 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragging = useRef(false);
   const lastMouse = useRef({ x: 0, y: 0 });
+  const timelineRequestRef = useRef(0);
 
   // ---------------------------------------------------------------------------
   // Graph canvas auto-fit + legend positioning
@@ -2789,16 +2793,15 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
     const bboxWidth = Math.max(maxX - minX, 1);
     const bboxHeight = Math.max(maxY - minY, 1);
 
-    const PADDING = 90;
+    const PADDING = 120;
     const availableWidth = Math.max(width - PADDING * 2, 100);
     const availableHeight = Math.max(height - PADDING * 2, 100);
-
     const fitZoom = Math.min(
       availableWidth / bboxWidth,
       availableHeight / bboxHeight,
       2
     );
-    const BOOST = 1.25; // makes the initial view ~25% larger than a tight fit
+    const BOOST = 1.1; // makes the initial view ~10% larger than a tight fit
     const clampedZoom = Math.max(0.15, Math.min(2, fitZoom * BOOST));
 
     const centerX = (minX + maxX) / 2;
@@ -3085,74 +3088,55 @@ function NetworkGraph({ caseId, onChangeCaseId }: { caseId: string; onChangeCase
       return;
     }
 
-    // Only load timeline when Timeline tab is opened.
     if (tab !== "timeline") return;
 
-    let cancelled = false;
-
-    // Empty string means All Cases — same convention as the graph fetch.
     const effectiveCaseId = caseId || undefined;
+    const requestId = ++timelineRequestRef.current;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Clear previous timeline immediately.
-    setTimelineEvents([]);
-    setTimelineGaps([]);
     setTimelineError(null);
     setTimelineLoading(true);
 
-    AIApi.buildTimeline(effectiveCaseId)
-      .then((result) => {
-        if (cancelled) return;
+    function load(attempt: number) {
+      AIApi.buildTimeline(effectiveCaseId)
+        .then((result) => {
+          if (cancelled || requestId !== timelineRequestRef.current) return;
 
-        const data = result as any;
-
-        // Backend timeline response:
-        //
-        // {
-        //   events: [...],
-        //   gaps_detected: [...]
-        // }
-        //
-        // Keep a few compatibility fallbacks.
-
-        const events = Array.isArray(data?.events)
-          ? data.events
-          : Array.isArray(data?.timeline_events)
-            ? data.timeline_events
-            : Array.isArray(data?.timeline)
-              ? data.timeline
-              : [];
-
-        const gaps = Array.isArray(data?.gaps_detected)
-          ? data.gaps_detected
-          : Array.isArray(data?.gaps)
-            ? data.gaps
+          const data = result as any;
+          const events = Array.isArray(data?.events) ? data.events
+            : Array.isArray(data?.timeline_events) ? data.timeline_events
+            : Array.isArray(data?.timeline) ? data.timeline
+            : [];
+          const gaps = Array.isArray(data?.gaps) ? data.gaps
+            : Array.isArray(data?.timeline_gaps) ? data.timeline_gaps
             : [];
 
-        setTimelineEvents(events);
-        setTimelineGaps(gaps);
-      })
-      .catch((error) => {
-        if (cancelled) return;
+          if (events.length === 0 && attempt < 4) {
+            retryTimer = setTimeout(() => load(attempt + 1), 1500);
+            return;
+          }
 
-        setTimelineEvents([]);
-        setTimelineGaps([]);
-
-        setTimelineError(
-          error instanceof Error
-            ? error.message
-            : "Couldn't load the timeline."
-        );
-      })
-      .finally(() => {
-        if (!cancelled) {
+          setTimelineEvents(events);
+          setTimelineGaps(gaps);
           setTimelineLoading(false);
-        }
-      });
+        })
+        .catch((error) => {
+          if (cancelled || requestId !== timelineRequestRef.current) return;
+          setTimelineError(
+            error instanceof Error ? error.message : "Couldn't load the timeline."
+          );
+          setTimelineLoading(false);
+        });
+    }
+
+    load(0);
 
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [tab, caseId, hasSession]);
+  }, [caseId, hasSession, tab]);
 
   // ---------------------------------------------------------------------------
   // Node colors
